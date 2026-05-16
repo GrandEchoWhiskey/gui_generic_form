@@ -1,118 +1,115 @@
-# Generic Tk Form Builder
+# GUI Form Toolkit
 
-A reusable Tkinter form utility built around one function:
+Tkinter-based toolkit with two desktop windows:
 
-- `create_form_window(fields, title="Generic Tk Form", on_save=None)`
+- Dynamic form builder
+- DataFrame analysis and editing view
 
-You define fields as dictionaries, and the form is built automatically.
+The project also includes centralized logging configuration and a shared GUI log handler.
 
-## Features
+## Modules
 
-- One-function window creation
-- Supported field types:
-  - `textbox`
-  - `numeric`
-  - `checkbox`
-  - `dropdown` / `dropbox`
-  - `radio`
-  - `date` / `datepicker`
-  - `time` / `timepicker`
-  - `textarea`
-  - `button` / `action`
-- Date picker popup with calendar
-- Time picker popup with `HH:MM:SS` controls and `Now`
-- Read-only log panel
-- Save button returns form data as a dictionary
-- Custom button callbacks with parent context
+- `main.py`: launcher and root logger setup (file + console)
+- `form_builder.py`: reusable form API and field classes
+- `analysis_view.py`: DataFrame browser, filter, edit, and return flow
+- `utils/gui_logging.py`: shared `GUIHandler` for writing logs into Tk text widgets
 
-## Quick Start
+## Requirements
 
-Run:
+- Python 3.10+
+- `pandas` for the analysis window
+
+Install dependencies:
+
+```bash
+pip install pandas
+```
+
+## Run
 
 ```bash
 python main.py
 ```
 
-## Basic Usage
+Launcher options:
+
+- `1`: open Form Builder window
+- `2`: open Data Analyzer window
+- `q`: quit launcher
+
+## Logging Behavior
+
+- Root logger is configured in `main.py`.
+- Logs are written to both console and `gui_form.log`.
+- Each opened window gets a child logger.
+- Window open/close lifecycle logs use `DEBUG` level.
+- In-window log panels show `INFO` and above (no debug noise).
+
+## Form Builder
+
+Primary API:
 
 ```python
-from main import create_form_window, FormParentContext
+from form_builder import create_form_window, TextField, NumericField
 
+result = create_form_window(
+    fields=[
+        TextField("username"),
+        NumericField("age", default=25, min_value=0, max_value=130),
+    ],
+    title="My Form",
+)
 
-def preview(parent: FormParentContext, values: dict):
-    parent.log_info("Preview clicked")
-    parent.set_value("username", "JohnDoe")
-
-
-fields = [
-    {"name": "username", "label": "User Name", "type": "textbox"},
-    {"name": "age", "label": "Age", "type": "numeric", "default": 25, "min": 0, "max": 130},
-    {"name": "start_date", "label": "Start Date", "type": "date"},
-    {"name": "start_time", "label": "Start Time", "type": "time"},
-    {"name": "notes", "label": "Notes", "type": "textarea", "height": 5},
-    {"type": "button", "label": "Preview", "on_click": preview},
-]
-
-result = create_form_window(fields, title="Dynamic Tk Form")
-print(result)
+values = result.get_values()
 ```
 
-## Field Definition Notes
+Supported field objects:
 
-Common keys:
+- `TextField`
+- `NumericField`
+- `CheckboxField`
+- `DropdownField`
+- `RadioField`
+- `DateField`
+- `TimeField`
+- `TextAreaField`
+- `ButtonField`
+- `TableViewField`
 
-- `name`: required for all non-button fields
-- `label`: text shown on the left
-- `type`: one of supported field types
-- `default`: initial value
+Callback context supports:
 
-Type-specific keys:
+- Reading values
+- Setting values
+- Resetting one or many fields
+- Writing structured logs (`debug/info/warning/error/...`)
 
-- `dropdown` / `dropbox`:
-  - `options`: list of values
-- `radio`:
-  - `options`: list of values
-- `numeric`:
-  - `min`, `max`, `default`
-- `textarea`:
-  - `height`
-- `date`:
-  - `format` (default: `%Y-%m-%d`)
-- `time`:
-  - `format` (default: `%H:%M:%S`)
-- `button`:
-  - `on_click`: callback
+## Data Analyzer
 
-## Button Callback Signature
+Primary API:
 
-Current callback order is:
+```python
+from analysis_view import run_dataframe_analyzer
 
-- `on_click(parent)`
-- `on_click(parent, values)`
+edited_df = run_dataframe_analyzer(dataframe=my_df)
+```
 
-Where:
+Behavior:
 
-- `parent` is `FormParentContext`
-- `values` is current form values dictionary
+- If `dataframe` is provided, demo data is not loaded.
+- If `dataframe` is `None`, demo data is loaded.
+- Closing the analyzer returns the current edited DataFrame (or `None` when empty).
 
-## FormParentContext API
+Main features:
 
-Methods and properties available in callbacks:
+- Load CSV / Excel
+- Multi-filter rows with `AND` / `OR`
+- Column visibility selector
+- Sort by column header
+- Add, edit, and delete rows
+- Edit dialog with all columns
+- Detailed mutation logs showing changed row data
 
-- `parent.root`
-- `parent.get_values()`
-- `parent.set_value(name, value)`
-- `parent.reset_field(name)`
-- `parent.reset_fields(names)`
-- `parent.reset_all()`
-- `parent.log_debug(msg, *args)`
-- `parent.log_info(msg, *args)`
-- `parent.log_warning(msg, *args)`
-- `parent.log_error(msg, *args)`
-- `parent.log_critical(msg, *args)`
-- `parent.log_exception(msg, *args)`
+## Notes
 
-## Save Behavior
-
-- Clicking Save returns all form values as a dictionary.
-- Closing the window without Save returns an empty dictionary.
+- The DataFrame grid is auto-fitted once after load and then remains user-resizable.
+- Shared GUI logging handler lives in `utils/gui_logging.py` to avoid duplicated logic.
