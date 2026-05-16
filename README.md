@@ -9,9 +9,10 @@ The project also includes centralized logging configuration and a shared GUI log
 
 ## Modules
 
-- `main.py`: launcher and root logger setup (file + console)
-- `form_builder.py`: reusable form API and field classes
+- `main.py`: launcher and window orchestration
+- `form_builder.py`: reusable form API with 10+ field types
 - `analysis_view.py`: DataFrame browser, filter, edit, and return flow
+- `utils/logger.py`: root and window logger setup (file + console)
 - `utils/gui_logging.py`: shared `GUIHandler` for writing logs into Tk text widgets
 
 ## Requirements
@@ -37,13 +38,13 @@ Launcher options:
 - `2`: open Data Analyzer window
 - `q`: quit launcher
 
-## Logging Behavior
+## Logging Architecture
 
-- Root logger is configured in `main.py`.
-- Logs are written to both console and `gui_form.log`.
-- Each opened window gets a child logger.
-- Window open/close lifecycle logs use `DEBUG` level.
-- In-window log panels show `INFO` and above (no debug noise).
+- Root logger is initialized via `build_root_logger()` in `utils/logger.py`
+- Logs are written to both console and `gui_form.log` with formatter: `%(asctime)s [%(levelname)s] %(name)s: %(message)s`
+- Each opened window gets a timestamped child logger via `create_window_logger()`
+- Window lifecycle events (open/close) are logged at `DEBUG` level
+- In-window log panels display `INFO` and above (DEBUG excluded from GUI)
 
 ## Form Builder
 
@@ -58,30 +59,40 @@ result = create_form_window(
         NumericField("age", default=25, min_value=0, max_value=130),
     ],
     title="My Form",
+    logger=my_logger,
 )
 
 values = result.get_values()
 ```
 
-Supported field objects:
+Supported field types:
 
-- `TextField`
-- `NumericField`
-- `CheckboxField`
-- `DropdownField`
-- `RadioField`
-- `DateField`
-- `TimeField`
-- `TextAreaField`
-- `ButtonField`
-- `TableViewField`
+- `TextField` — single-line text input
+- `NumericField` — numeric with optional min/max bounds
+- `CheckboxField` — boolean checkbox
+- `DropdownField` — dropdown selector with options
+- `RadioField` — radio button group
+- `DateField` — date picker
+- `TimeField` — time picker
+- `TextAreaField` — multi-line text
+- `ButtonField` — clickable button with callback
+- `TableViewField` — embedded read-only table
 
-Callback context supports:
+Callback context:
 
-- Reading values
-- Setting values
-- Resetting one or many fields
-- Writing structured logs (`debug/info/warning/error/...`)
+Each button callback receives a `FormParentContext` object supporting:
+
+- `get_values()` — read current form values as dict
+- `set_value(field_name, value)` — update field value
+- `reset_field(field_name)` — clear single field
+- `reset_all()` — clear all fields
+- `debug/info/warning/error(msg)` — write structured logs
+
+Window logging:
+
+- Window open/close events logged at DEBUG level
+- Form save/cancel logged at DEBUG
+- User interactions logged to in-window panel at INFO+ level
 
 ## Data Analyzer
 
@@ -90,26 +101,32 @@ Primary API:
 ```python
 from analysis_view import run_dataframe_analyzer
 
-edited_df = run_dataframe_analyzer(dataframe=my_df)
+edited_df = run_dataframe_analyzer(dataframe=my_df, logger=my_logger)
 ```
 
 Behavior:
 
-- If `dataframe` is provided, demo data is not loaded.
-- If `dataframe` is `None`, demo data is loaded.
-- Closing the analyzer returns the current edited DataFrame (or `None` when empty).
+- If `dataframe` is provided, it loads; otherwise, demo data is used.
+- Closing the analyzer returns the edited DataFrame (or `None` if empty).
+- All mutations (add/edit/delete rows) are logged with detailed before/after snapshots.
 
 Main features:
 
-- Load CSV / Excel
-- Multi-filter rows with `AND` / `OR`
-- Column visibility selector
-- Sort by column header
-- Add, edit, and delete rows
-- Edit dialog with all columns
-- Detailed mutation logs showing changed row data
+- **Load data**: CSV / Excel import
+- **Filter rows**: Multi-row filter system with AND/OR logic
+- **Sort**: Click column headers to toggle ascending/descending
+- **Column visibility**: Right-click column header or use selector to show/hide columns
+- **Edit rows**: Scrollable form with automatic type casting for each field
+- **Add rows**: New rows logged with row count update
+- **Delete rows**: Shows deleted row data in logs
+- **Status bar**: Displays current row and column counts
+- **Auto-fit columns**: One-time fit on load; user-resizable afterwards
 
-## Notes
+## Architecture & Design
 
-- The DataFrame grid is auto-fitted once after load and then remains user-resizable.
-- Shared GUI logging handler lives in `utils/gui_logging.py` to avoid duplicated logic.
+- **Modular logging**: `utils/logger.py` exports setup functions; `main.py` calls them at startup
+- **Shared GUI handler**: `utils/gui_logging.py` provides `GUIHandler` to avoid duplicate logging-to-widget logic
+- **Optional loggers**: Form builder and analyzer accept optional `logger` parameter; create internal loggers if none provided
+- **DEBUG filtering**: Lifecycle events logged at DEBUG; GUI panels display INFO+ only to reduce noise
+- **Child logger per window**: Each window gets a timestamped logger for session isolation
+- **Column auto-fit**: DataFrame grid auto-fits columns once on load; user can resize afterwards
