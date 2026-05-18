@@ -4,7 +4,7 @@ import logging
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
-from utils.gui_logging import GUIHandler
+from utils.logger import GUIHandler
 
 if TYPE_CHECKING:
 	import pandas as _pd  # type: ignore[reportMissingImports]

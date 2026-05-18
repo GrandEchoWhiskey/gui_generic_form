@@ -15,7 +15,7 @@ from datetime import datetime
 from tkinter import ttk
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Dict, List
-from utils.gui_logging import GUIHandler
+from utils.logger import GUIHandler
 
 
 class FormParentContext:
