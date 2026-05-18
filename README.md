@@ -1,132 +1,260 @@
-# GUI Form Toolkit
+# simple_form
 
-Tkinter-based toolkit with two desktop windows:
+`simple_form` is a small Tkinter-based form builder for quickly assembling desktop forms with declarative field definitions.
 
-- Dynamic form builder
-- DataFrame analysis and editing view
+## What you can do
 
-The project also includes centralized logging configuration and a shared GUI log handler.
-
-## Modules
-
-- `main.py`: launcher and window orchestration
-- `form_builder.py`: reusable form API with 10+ field types
-- `analysis_view.py`: DataFrame browser, filter, edit, and return flow
-- `utils/logger.py`: root and window logger setup (file + console)
-- `utils/gui_logging.py`: shared `GUIHandler` for writing logs into Tk text widgets
-
-## Requirements
-
-- Python 3.10+
-- `pandas` for the analysis window
-
-Install dependencies:
-
-```bash
-pip install pandas
-```
-
-## Run
-
-```bash
-python main.py
-```
-
-Launcher options:
-
-- `1`: open Form Builder window
-- `2`: open Data Analyzer window
-- `q`: quit launcher
-
-## Logging Architecture
-
-- Root logger is initialized via `build_root_logger()` in `utils/logger.py`
-- Logs are written to both console and `gui_form.log` with formatter: `%(asctime)s [%(levelname)s] %(name)s: %(message)s`
-- Each opened window gets a timestamped child logger via `create_window_logger()`
-- Window lifecycle events (open/close) are logged at `DEBUG` level
-- In-window log panels display `INFO` and above (DEBUG excluded from GUI)
-
-## Form Builder
-
-Primary API:
+### Build forms declaratively
+Define a form as a subclass of `Form`, then declare fields as class attributes.
 
 ```python
-from form_builder import create_form_window, TextField, NumericField
+from simple_form import Form, TextField, Button
 
-result = create_form_window(
-    fields=[
-        TextField("username"),
-        NumericField("age", default=25, min_value=0, max_value=130),
-    ],
-    title="My Form",
-    logger=my_logger,
+@Form
+class MyForm(Form):
+    name = TextField(label="Name", default="John Doe")
+    submit = Button(label="Submit", on_click="submit_form")
+
+    def submit_form(self):
+        print(self.name.value)
+```
+
+Run the form with:
+
+```python
+MyForm(title="Demo", logging_enabled=True).run()
+```
+
+`title` and `logging_enabled` are runtime constructor arguments, not class-body settings.
+
+### Use text inputs
+- `TextField` for single-line text.
+- `TextArea` for multi-line text.
+- `PasswordField` for masked input, with optional reveal button control.
+
+#### Syntax
+```python
+TextField(label="Name", default="John Doe")
+TextArea(label="Description", default="")
+PasswordField(label="Password", default="", can_show=False)
+```
+
+### Use choice inputs
+- `CheckBox` for booleans.
+- `CheckBoxGroup` for multiple booleans.
+- `RadioGroup` for one-of-many selection.
+- `Select` for a clean dropdown selection.
+- `MultiSelect` for selecting multiple values with a collapsible summary view.
+
+#### Syntax
+```python
+CheckBox(label="Accept terms", default=False)
+CheckBoxGroup(label="Options", options=[CheckBox(label="A"), CheckBox(label="B")])
+RadioGroup(label="Mode", options=[Radio(label="A", default=True), Radio(label="B")])
+Select(label="Plan", options=["Basic", "Pro"], default="Pro")
+MultiSelect(label="Tags", options=["UI", "API"], default=["UI"], sep="; ")
+```
+
+### Use numeric inputs
+- `NumberField` for integer or floating-point values.
+- Supports `min_value`, `max_value`, `step`, and integer mode.
+
+#### Syntax
+```python
+NumberField(label="Amount", default=10, min_value=0, max_value=100, step=1, integer=True)
+```
+
+### Use file and folder inputs
+- `FilePath` for file selection.
+- `DirectoryPath` for folder selection.
+- Both support browse buttons.
+- Both also support drag-and-drop textbox input when `tkinterdnd2` is installed.
+
+#### Syntax
+```python
+FilePath(label="File", default="", extensions={"text files": ["*.txt"], "all files": ["*.*"]})
+DirectoryPath(label="Folder", default="")
+```
+
+### Use date and time inputs
+- `DatePicker` supports configurable `date_format`.
+- `TimePicker` supports configurable `time_format`.
+- Both include:
+  - split/text input modes
+  - a picker button
+  - a Today button for date
+  - a Now button for time
+  - validation on focus out / invalid input handling
+
+#### Syntax
+```python
+DatePicker(label="Date", default="18.05.2026", date_format="%d.%m.%Y")
+TimePicker(label="Time", default="14:30", time_format="%H:%M")
+```
+
+### Log from the form
+When `logging_enabled=True`, the form creates an internal logging area.
+
+You can write log messages using the standard `logging` module:
+
+```python
+import logging
+logging.info("Started")
+logging.warning("Something to check")
+logging.error("Something failed")
+```
+
+The form automatically hooks into the root logging configuration when it is created, and it forwards `INFO` and above into the form log area.
+`DEBUG` messages are ignored by default.
+
+## Available field types
+
+- `TextField`
+- `PasswordField`
+- `TextArea`
+- `Button`
+- `CheckBox`
+- `CheckBoxGroup`
+- `RadioGroup`
+- `Select`
+- `MultiSelect`
+- `NumberField`
+- `FilePath`
+- `DirectoryPath`
+- `DatePicker`
+- `TimePicker`
+
+## Field behavior
+
+### `.value`
+Each bound field exposes a `.value` property for reading and writing the current value.
+
+Examples:
+
+```python
+print(self.name.value)
+self.name.value = "New value"
+```
+
+For groups and special controls:
+- `CheckBoxGroup.value` returns a `dict[str, bool]`
+- `RadioGroup.value` returns a `str`
+- `Select.value` returns a `str`
+- `MultiSelect.value` returns a `list[str]`
+- `NumberField.value` returns an `int` or `float`
+- `DatePicker.value` returns a formatted string
+- `TimePicker.value` returns a formatted string
+
+## Form constructor options
+
+`Form` accepts runtime overrides:
+
+```python
+MyForm(title="My App", logging_enabled=True)
+```
+
+Supported overrides:
+- `title`
+- `logging_enabled`
+
+Unknown constructor arguments raise `TypeError`.
+
+## Validation rules
+
+Several controls validate their configuration at setup time:
+
+- `RadioGroup` must have exactly one default option.
+- `Select` requires non-empty options and default must be in options.
+- `MultiSelect` requires non-empty options and defaults must exist in options.
+- `NumberField` requires positive step and valid min/max range.
+- `DatePicker` validates `date_format` and `default` against that format.
+- `TimePicker` validates `time_format` and `default` against that format.
+
+## Date and time formatting
+
+### DatePicker
+Use any `datetime.strptime` / `strftime` compatible format supported by the picker’s token set.
+
+Example:
+
+```python
+DatePicker(label="Date", default="18.05.2026", date_format="%d.%m.%Y")
+```
+
+### TimePicker
+Use a compatible time format for split/text mode.
+
+Example:
+
+```python
+TimePicker(label="Time", time_format="%H:%M")
+```
+
+The split view adapts to the directives you include in the format string.
+
+## Drag and drop
+
+`FilePath` and `DirectoryPath` can accept drops directly into the textbox when `tkinterdnd2` is installed.
+
+If `tkinterdnd2` is not available, browse buttons still work normally.
+
+## Dependencies
+
+Runtime dependency:
+
+```text
+tkinterdnd2
+```
+
+Python’s built-in `tkinter` module is used as well.
+
+## Example form
+
+```python
+from simple_form import (
+    Form,
+    TextField,
+    PasswordField,
+    Select,
+    MultiSelect,
+    NumberField,
+    FilePath,
+    DirectoryPath,
+    DatePicker,
+    TimePicker,
+    Button,
 )
 
-values = result.get_values()
+@Form
+class MyForm(Form):
+    name = TextField(label="Name")
+    secret = PasswordField(label="Secret", can_show=False)
+    plan = Select(label="Plan", options=["Basic", "Pro", "Enterprise"], default="Pro")
+    tags = MultiSelect(label="Tags", options=["UI", "API", "DB"], default=["UI"], sep="; ")
+    amount = NumberField(label="Amount", default=10, min_value=0, max_value=100, step=1, integer=True)
+    file_path = FilePath(label="File")
+    folder_path = DirectoryPath(label="Folder")
+    date = DatePicker(label="Date", default="18.05.2026", date_format="%d.%m.%Y")
+    time = TimePicker(label="Time", time_format="%H:%M")
+    submit = Button(label="Submit", on_click="on_submit")
+
+    def on_submit(self):
+        print(self.name.value)
+        print(self.secret.value)
+        print(self.plan.value)
+        print(self.tags.value)
+        print(self.amount.value)
+        print(self.file_path.value)
+        print(self.folder_path.value)
+        print(self.date.value)
+        print(self.time.value)
+
+if __name__ == "__main__":
+    MyForm(title="My Form", logging_enabled=True).run()
 ```
 
-Supported field types:
+## Notes
 
-- `TextField` — single-line text input
-- `NumericField` — numeric with optional min/max bounds
-- `CheckboxField` — boolean checkbox
-- `DropdownField` — dropdown selector with options
-- `RadioField` — radio button group
-- `DateField` — date picker
-- `TimeField` — time picker
-- `TextAreaField` — multi-line text
-- `ButtonField` — clickable button with callback
-- `TableViewField` — embedded read-only table
-
-Callback context:
-
-Each button callback receives a `FormParentContext` object supporting:
-
-- `get_values()` — read current form values as dict
-- `set_value(field_name, value)` — update field value
-- `reset_field(field_name)` — clear single field
-- `reset_all()` — clear all fields
-- `debug/info/warning/error(msg)` — write structured logs
-
-Window logging:
-
-- Window open/close events logged at DEBUG level
-- Form save/cancel logged at DEBUG
-- User interactions logged to in-window panel at INFO+ level
-
-## Data Analyzer
-
-Primary API:
-
-```python
-from analysis_view import run_dataframe_analyzer
-
-edited_df = run_dataframe_analyzer(dataframe=my_df, logger=my_logger)
-```
-
-Behavior:
-
-- If `dataframe` is provided, it loads; otherwise, demo data is used.
-- Closing the analyzer returns the edited DataFrame (or `None` if empty).
-- All mutations (add/edit/delete rows) are logged with detailed before/after snapshots.
-
-Main features:
-
-- **Load data**: CSV / Excel import
-- **Filter rows**: Multi-row filter system with AND/OR logic
-- **Sort**: Click column headers to toggle ascending/descending
-- **Column visibility**: Right-click column header or use selector to show/hide columns
-- **Edit rows**: Scrollable form with automatic type casting for each field
-- **Add rows**: New rows logged with row count update
-- **Delete rows**: Shows deleted row data in logs
-- **Status bar**: Displays current row and column counts
-- **Auto-fit columns**: One-time fit on load; user-resizable afterwards
-
-## Architecture & Design
-
-- **Modular logging**: `utils/logger.py` exports setup functions; `main.py` calls them at startup
-- **Shared GUI handler**: `utils/gui_logging.py` provides `GUIHandler` to avoid duplicate logging-to-widget logic
-- **Optional loggers**: Form builder and analyzer accept optional `logger` parameter; create internal loggers if none provided
-- **DEBUG filtering**: Lifecycle events logged at DEBUG; GUI panels display INFO+ only to reduce noise
-- **Child logger per window**: Each window gets a timestamped logger for session isolation
-- **Column auto-fit**: DataFrame grid auto-fits columns once on load; user can resize afterwards
+- `PasswordField.can_show` controls whether reveal is available.
+- `MultiSelect.sep` controls how collapsed selections are joined.
+- If you want debug output in the log area, configure logging accordingly before using the form.
