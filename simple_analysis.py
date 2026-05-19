@@ -63,10 +63,19 @@ class _DataFrameAnalysisWindow:
 		self._data_tree = None
 		self._advanced_filters: list[dict] = []  # [{"column": str, "condition": str, "value": str}, ...]
 		self._data_filters_frame = None  # Will hold the active filters display frame
+		self._sort_column: str | None = None
+		self._sort_descending = False
+		self._data_row_positions: list[int] = []
+		self._done_with_filter_clicked = False
 		self._done_clicked = False  # Track if Done button was clicked
 		self._notebook = None
 		self._tabs: dict[str, ttk.Frame] = {}
-		self._root = tk.Tk()
+		if tk._default_root is None:
+			self._root = tk.Tk()
+			self._owns_mainloop = True
+		else:
+			self._root = tk.Toplevel(tk._default_root)
+			self._owns_mainloop = False
 		self._root.title(title)
 		self._root.geometry("1000x640")
 		self._root.minsize(700, 420)
@@ -104,7 +113,10 @@ class _DataFrameAnalysisWindow:
 
 	def show(self):
 		self._root.protocol("WM_DELETE_WINDOW", self._on_window_close)
-		self._root.mainloop()
+		if self._owns_mainloop:
+			self._root.mainloop()
+		else:
+			self._root.wait_window(self._root)
 
 	def _on_window_close(self):
 		# If Done wasn't clicked, restore original dataframe
@@ -113,8 +125,16 @@ class _DataFrameAnalysisWindow:
 		self._root.destroy()
 
 	def _on_done_clicked(self):
+		self._done_with_filter_clicked = False
 		self._done_clicked = True
-		self._root.quit()
+		self._root.destroy()
+
+	def _on_done_with_filter_clicked(self):
+		filtered_rows = self._build_visible_dataframe(apply_search=False, apply_sort=True)
+		self._dataframe = self._dataframe.loc[filtered_rows.index].reset_index(drop=True)
+		self._done_with_filter_clicked = True
+		self._done_clicked = True
+		self._root.destroy()
 
 	def destroy(self):
 		self._root.update_idletasks()
@@ -134,6 +154,10 @@ class _DataFrameAnalysisWindow:
 		).pack(side=tk.LEFT)
 
 		ttk.Button(footer, text="Done", command=self._on_done_clicked).pack(side=tk.RIGHT, padx=(8, 0))
+		ttk.Button(footer, text="Done With Filter", command=self._on_done_with_filter_clicked).pack(
+			side=tk.RIGHT,
+			padx=(8, 0),
+		)
 
 		self._footer = footer
 		self._footer_label = footer.winfo_children()[0]
@@ -153,20 +177,9 @@ class _DataFrameAnalysisWindow:
 
 		self._tabs.clear()
 
-		# Apply advanced filters to full dataframe first (even hidden columns can be filtered)
-		filtered_df = self._dataframe.copy()
-		if self._advanced_filters:
-			filtered_df = self._apply_advanced_filters(filtered_df)
-
-		# Then select visible columns
-		visible_df = filtered_df.loc[:, [col for col in self._visible_columns if col in filtered_df.columns]].copy()
-		if not visible_df.columns.tolist():
-			visible_df = pd.DataFrame(index=filtered_df.index)
-
-		# Apply search filter to visible columns
-		data_df = visible_df.copy()
-		if self._data_search_filter:
-			data_df = self._apply_search_filter(data_df, self._data_search_filter)
+		visible_df = self._build_visible_dataframe(apply_search=False, apply_sort=False)
+		data_df = self._build_visible_dataframe(apply_search=True, apply_sort=True)
+		self._data_row_positions = [int(position) for position in data_df.index.tolist()]
 
 		views = [
 			("Data", _table_ready(data_df, include_index=not self._hide_index)),
@@ -203,6 +216,86 @@ class _DataFrameAnalysisWindow:
 				text=f"Rows: {row_text}    Columns: {cols}/{total_cols}    Missing values: {missing_values}"
 			)
 
+	def _build_visible_dataframe(self, apply_search: bool, apply_sort: bool) -> pd.DataFrame:
+		filtered_df = self._dataframe.copy()
+		if self._advanced_filters:
+			filtered_df = self._apply_advanced_filters(filtered_df)
+
+		visible_columns = [col for col in self._visible_columns if col in filtered_df.columns]
+		if visible_columns:
+			visible_df = filtered_df.loc[:, visible_columns].copy()
+		else:
+			visible_df = pd.DataFrame(index=filtered_df.index)
+
+		if apply_search and self._data_search_filter:
+			visible_df = self._apply_search_filter(visible_df, self._data_search_filter)
+
+		if apply_sort:
+			visible_df = self._apply_sort(visible_df)
+
+		return visible_df
+
+	def _apply_sort(self, dataframe: pd.DataFrame) -> pd.DataFrame:
+		if self._sort_column is None:
+			return dataframe
+
+		if self._sort_column == "__index__":
+			return dataframe.sort_index(ascending=not self._sort_descending, kind="mergesort")
+
+		if self._sort_column not in dataframe.columns:
+			return dataframe
+
+		column = self._sort_column
+		series = dataframe[column]
+		numeric_series = pd.to_numeric(series, errors="coerce")
+		if numeric_series.notna().any():
+			sort_frame = dataframe.assign(__sort_value=numeric_series)
+			sorted_frame = sort_frame.sort_values(
+				"__sort_value",
+				ascending=not self._sort_descending,
+				na_position="last",
+				kind="mergesort",
+			)
+			return sorted_frame.drop(columns=["__sort_value"])
+
+		return dataframe.sort_values(
+			by=column,
+			ascending=not self._sort_descending,
+			na_position="last",
+			kind="mergesort",
+			key=lambda s: s.astype(str).str.lower(),
+		)
+
+	def _header_text(self, column: str, tab_name: str) -> str:
+		if tab_name != "Data":
+			return column
+
+		if self._sort_column == column:
+			arrow = "▼" if self._sort_descending else "▲"
+			return f"{column} {arrow}"
+
+		if self._sort_column == "__index__" and column == "Index":
+			arrow = "▼" if self._sort_descending else "▲"
+			return f"{column} {arrow}"
+
+		return column
+
+	def _on_data_header_click(self, column: str):
+		target = "__index__" if column == "Index" and not self._hide_index else column
+
+		if self._sort_column == target:
+			self._sort_descending = not self._sort_descending
+		else:
+			self._sort_column = target
+			self._sort_descending = False
+
+		self._render_tabs()
+
+	def _clear_data_sort(self):
+		self._sort_column = None
+		self._sort_descending = False
+		self._render_tabs()
+
 	def _visible_dataframe(self) -> pd.DataFrame:
 		columns = [column for column in self._visible_columns if column in self._dataframe.columns]
 		if not columns:
@@ -215,9 +308,11 @@ class _DataFrameAnalysisWindow:
 			action_row.pack(fill=tk.X, pady=(0, 8))
 			ttk.Button(action_row, text="Add Row", command=self._open_add_row_from_pointer).pack(side=tk.LEFT)
 			ttk.Button(action_row, text="Filter Columns", command=self._open_column_filter).pack(side=tk.LEFT, padx=(8, 0))
+			ttk.Button(action_row, text="Clear Sort", command=self._clear_data_sort).pack(side=tk.LEFT, padx=(8, 0))
 			ttk.Label(action_row, text="Search:").pack(side=tk.LEFT, padx=(16, 4))
 			search_entry = ttk.Entry(action_row, width=25)
 			search_entry.pack(side=tk.LEFT)
+			search_entry.insert(0, self._data_search_filter)
 			search_entry.bind(
 				"<KeyRelease>",
 				lambda _event: self._on_data_search_change(search_entry.get()),
@@ -302,12 +397,18 @@ class _DataFrameAnalysisWindow:
 		initial_widths: dict[str, int] = {}
 		for column in columns:
 			width = max(120, min(260, len(column) * 12))
-			tree.heading(column, text=column)
+			header_text = self._header_text(column, tab_name)
+			if tab_name == "Data":
+				tree.heading(column, text=header_text, command=lambda c=column: self._on_data_header_click(c))
+			else:
+				tree.heading(column, text=header_text)
 			tree.column(column, width=width, minwidth=90, anchor=tk.W, stretch=False)
 			initial_widths[column] = width
 
-		for row in dataframe.itertuples(index=False, name=None):
+		for row_idx, row in enumerate(dataframe.itertuples(index=False, name=None)):
 			iid = str(len(tree.get_children()))
+			if tab_name == "Data" and row_idx < len(self._data_row_positions):
+				iid = str(self._data_row_positions[row_idx])
 			tree.insert("", tk.END, iid=iid, values=tuple("" if value is None else str(value) for value in row))
 
 		if tab_name == "Data":
@@ -340,22 +441,11 @@ class _DataFrameAnalysisWindow:
 		if not self._data_tree or not self._data_tree.winfo_exists():
 			return
 
-		# Apply advanced filters to full dataframe first (even hidden columns can be filtered)
-		filtered_df = self._dataframe.copy()
-		if self._advanced_filters:
-			filtered_df = self._apply_advanced_filters(filtered_df)
-
-		# Then select visible columns
-		visible_df = filtered_df.loc[:, [col for col in self._visible_columns if col in filtered_df.columns]].copy()
-		if not visible_df.columns.tolist():
-			visible_df = pd.DataFrame(index=filtered_df.index)
-
-		# Apply search filter to visible columns
-		if self._data_search_filter:
-			visible_df = self._apply_search_filter(visible_df, self._data_search_filter)
+		visible_df = self._build_visible_dataframe(apply_search=True, apply_sort=True)
+		self._data_row_positions = [int(position) for position in visible_df.index.tolist()]
 
 		display_df = _table_ready(visible_df, include_index=not self._hide_index)
-		self._refresh_data_tree(display_df)
+		self._refresh_data_tree(display_df, row_positions=self._data_row_positions)
 
 	def _apply_search_filter(self, dataframe: pd.DataFrame, search_text: str) -> pd.DataFrame:
 		if not search_text:
@@ -369,15 +459,18 @@ class _DataFrameAnalysisWindow:
 
 		return dataframe[mask]
 
-	def _refresh_data_tree(self, dataframe: pd.DataFrame):
+	def _refresh_data_tree(self, dataframe: pd.DataFrame, row_positions: list[int] | None = None):
 		if not self._data_tree or not self._data_tree.winfo_exists():
 			return
 
 		for item in self._data_tree.get_children():
 			self._data_tree.delete(item)
 
-		for row in dataframe.itertuples(index=False, name=None):
-			self._data_tree.insert("", tk.END, values=tuple("" if value is None else str(value) for value in row))
+		for row_idx, row in enumerate(dataframe.itertuples(index=False, name=None)):
+			iid = ""
+			if row_positions is not None and row_idx < len(row_positions):
+				iid = str(row_positions[row_idx])
+			self._data_tree.insert("", tk.END, iid=iid, values=tuple("" if value is None else str(value) for value in row))
 
 	def _add_advanced_filter(self, column: str, condition: str, value: str):
 		self._advanced_filters.append({"column": column, "condition": condition, "value": value})
@@ -477,22 +570,11 @@ class _DataFrameAnalysisWindow:
 		if not self._data_tree or not self._data_tree.winfo_exists():
 			return
 
-		# Apply advanced filters to full dataframe first (even hidden columns can be filtered)
-		filtered_df = self._dataframe.copy()
-		if self._advanced_filters:
-			filtered_df = self._apply_advanced_filters(filtered_df)
-
-		# Then select visible columns
-		visible_df = filtered_df.loc[:, [col for col in self._visible_columns if col in filtered_df.columns]].copy()
-		if not visible_df.columns.tolist():
-			visible_df = pd.DataFrame(index=filtered_df.index)
-
-		# Apply search filter to visible columns
-		if self._data_search_filter:
-			visible_df = self._apply_search_filter(visible_df, self._data_search_filter)
+		visible_df = self._build_visible_dataframe(apply_search=True, apply_sort=True)
+		self._data_row_positions = [int(position) for position in visible_df.index.tolist()]
 
 		display_df = _table_ready(visible_df, include_index=not self._hide_index)
-		self._refresh_data_tree(display_df)
+		self._refresh_data_tree(display_df, row_positions=self._data_row_positions)
 
 		# Update footer with filtered row count
 		if hasattr(self, "_footer_label"):
@@ -603,6 +685,9 @@ class _DataFrameAnalysisWindow:
 			return
 
 		self._visible_columns = [str(column) for column in selected_columns]
+		if self._sort_column and self._sort_column not in self._visible_columns and self._sort_column != "__index__":
+			self._sort_column = None
+			self._sort_descending = False
 		dialog.destroy()
 		self._render_tabs()
 
