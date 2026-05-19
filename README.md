@@ -270,3 +270,52 @@ if __name__ == "__main__":
 - `PasswordField.can_show` controls whether reveal is available.
 - `MultiSelect.sep` controls how collapsed selections are joined.
 - Set `logging_debug=True` if you want `DEBUG` output inside the form log area.
+
+## Data analysis tool
+
+`simple_analysis.py` provides a Tkinter dataframe editor/viewer.
+
+### analyze_data
+
+```python
+from simple_analysis import analyze_data
+
+edited_df = analyze_data(
+        df,
+        title="Data Analysis",
+        hide_index=True,
+        rev_filter=["Status"],
+)
+```
+
+Arguments:
+- `dataframe`: input `pandas.DataFrame`
+- `title`: window title
+- `hide_index`: hide/show row index in Data tab
+- `filter`: optional include-only column list
+- `rev_filter`: optional exclude column list
+
+Rules:
+- Use only one of `filter` or `rev_filter`.
+- Passing both raises `ValueError`.
+
+### What the window supports
+
+- Tabs: `Data`, `Summary`, `Dtypes`, `Missing`
+- Double-click row to edit
+- Add row / delete row
+- Column visibility dialog (`Filter Columns`)
+- Search box for live text filtering across visible columns
+- Advanced row filters with conditions:
+    - `contains`, `equals`, `regex`, `starts with`, `ends with`
+    - `bigger than`, `less than`, `bigger or equal`, `less or equal`
+    - `empty`, `not empty`
+
+Advanced filters are applied to the full dataframe first, so they also work on hidden columns.
+
+### Return and close behavior
+
+- Click `Done` to confirm and return the edited dataframe.
+- Close with the window `X` button to cancel and return the original dataframe unchanged.
+
+`rev_filter` and `filter` affect only what is visible in the UI, not which columns exist in the returned dataframe.

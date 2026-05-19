@@ -1,1 +1,2 @@
 tkinterdnd2>=0.4.2
+pandas>=2.0
