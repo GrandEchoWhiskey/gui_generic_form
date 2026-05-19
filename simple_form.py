@@ -409,7 +409,7 @@ class _FormLogHandler(logging.Handler):
     def __init__(self):
         super().__init__(level=logging.INFO)
         self._widget = None
-        self._buffer: list[str] = []
+        self._buffer: list[tuple[str, Optional[int]]] = []
         self.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s", "%H:%M:%S"))
 
     def set_widget(self, widget: tk.Text):
@@ -419,34 +419,49 @@ class _FormLogHandler(logging.Handler):
 
         pending = self._buffer[:]
         self._buffer.clear()
-        for line in pending:
-            self._append_line(line)
+        for line, levelno in pending:
+            self._append_line(line, levelno)
 
     def emit(self, record: logging.LogRecord):
         try:
             if record.levelno < self.level:
                 return
             message = self.format(record)
-            self._append_line(message)
+            self._append_line(message, record.levelno)
         except Exception:
             self.handleError(record)
 
-    def _append_line(self, message: str):
+    def _append_line(self, message: str, levelno: Optional[int] = None):
         if self._widget is None:
-            self._buffer.append(message)
+            self._buffer.append((message, levelno))
             return
 
-        self._widget.after(0, self._write_to_widget, message)
+        self._widget.after(0, self._write_to_widget, message, levelno)
 
-    def _write_to_widget(self, message: str):
+    def _write_to_widget(self, message: str, levelno: Optional[int] = None):
         if self._widget is None:
-            self._buffer.append(message)
+            self._buffer.append((message, levelno))
             return
 
+        tag = self._tag_for_level(levelno)
         self._widget.configure(state=tk.NORMAL)
-        self._widget.insert(tk.END, message + "\n")
+        if tag:
+            self._widget.insert(tk.END, message + "\n", tag)
+        else:
+            self._widget.insert(tk.END, message + "\n")
         self._widget.configure(state=tk.DISABLED)
         self._widget.see(tk.END)
+
+    def _tag_for_level(self, levelno: Optional[int]) -> Optional[str]:
+        if levelno is None:
+            return None
+        if levelno >= logging.ERROR:
+            return "log_error"
+        if levelno >= logging.WARNING:
+            return "log_warning"
+        if levelno >= logging.INFO:
+            return "log_info"
+        return "log_debug"
 
 
 class _BoundTextArea:
@@ -1126,9 +1141,11 @@ class Form:
     def __init__(self, **kwargs):
         default_title = self.__class__.__name__
         default_logging_enabled = True
+        default_logging_debug = False
 
         self.title = kwargs.pop("title", default_title)
         self.logging_enabled = bool(kwargs.pop("logging_enabled", default_logging_enabled))
+        self.logging_debug = bool(kwargs.pop("logging_debug", default_logging_debug))
 
         if kwargs:
             unknown = ", ".join(sorted(kwargs.keys()))
@@ -1137,6 +1154,8 @@ class Form:
         self._logging_handler = None
         if self.logging_enabled:
             self._logging_handler = _FormLogHandler()
+            if self.logging_debug:
+                self._logging_handler.setLevel(logging.DEBUG)
             logging.getLogger().addHandler(self._logging_handler)
 
         if TkinterDnD is not None:
@@ -1585,6 +1604,10 @@ class Form:
         row = getattr(self, "_next_row", 0)
         log_widget = tk.Text(self._frame, width=60, height=8)
         log_widget.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        log_widget.tag_configure("log_debug", foreground="#6e7781")
+        log_widget.tag_configure("log_info", foreground="#1f6feb")
+        log_widget.tag_configure("log_warning", foreground="#9a6700")
+        log_widget.tag_configure("log_error", foreground="#cf222e")
         log_widget.configure(state=tk.DISABLED)
 
         self.log_text_area = _BoundTextArea(log_widget)

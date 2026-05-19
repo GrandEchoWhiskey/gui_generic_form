@@ -63,7 +63,10 @@ class MyForm(Form):
         print(f"Date: {self.date_field.value}")
         print(f"Time: {self.time_field.value}")
         logging.info("Form submitted successfully.")
+        logging.debug(f"Form data: Name={name}, Description={description}, Checkbox={self.checkbox_field.value}, Radio Group={self.radio_group.value}, Password={self.password_field.value}, Category={self.category_field.value}, Tags={self.tags_field.value}, Amount={self.amount_field.value}, File Path={self.path.value}, Directory Path={self.directory.value}, Date={self.date_field.value}, Time={self.time_field.value}")
+        logging.warning("This is a warning message.")
+        logging.error("This is an error message.")
 
 
 if __name__ == "__main__":
-    MyForm(title="My Form Example", logging_enabled=True).run()
+    MyForm(title="My Form Example", logging_enabled=True, logging_debug=True).run()

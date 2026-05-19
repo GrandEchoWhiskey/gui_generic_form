@@ -25,7 +25,7 @@ Run the form with:
 MyForm(title="Demo", logging_enabled=True).run()
 ```
 
-`title` and `logging_enabled` are runtime constructor arguments, not class-body settings.
+`title`, `logging_enabled`, and `logging_debug` are runtime constructor arguments, not class-body settings.
 
 ### Use text inputs
 - `TextField` for single-line text.
@@ -104,8 +104,19 @@ logging.warning("Something to check")
 logging.error("Something failed")
 ```
 
-The form automatically hooks into the root logging configuration when it is created, and it forwards `INFO` and above into the form log area.
-`DEBUG` messages are ignored by default.
+The form automatically hooks into the root logging configuration when it is created.
+
+By default, it forwards `INFO` and above into the form log area:
+- `INFO` is shown in blue
+- `WARNING` is shown in amber
+- `ERROR` and `CRITICAL` are shown in red
+- `DEBUG` is shown in muted gray only when debug logging is enabled
+
+Enable debug messages in the form log area with:
+
+```python
+MyForm(title="Demo", logging_enabled=True, logging_debug=True).run()
+```
 
 ## Available field types
 
@@ -150,12 +161,13 @@ For groups and special controls:
 `Form` accepts runtime overrides:
 
 ```python
-MyForm(title="My App", logging_enabled=True)
+MyForm(title="My App", logging_enabled=True, logging_debug=False)
 ```
 
 Supported overrides:
 - `title`
 - `logging_enabled`
+- `logging_debug`
 
 Unknown constructor arguments raise `TypeError`.
 
@@ -250,11 +262,11 @@ class MyForm(Form):
         print(self.time.value)
 
 if __name__ == "__main__":
-    MyForm(title="My Form", logging_enabled=True).run()
+    MyForm(title="My Form", logging_enabled=True, logging_debug=True).run()
 ```
 
 ## Notes
 
 - `PasswordField.can_show` controls whether reveal is available.
 - `MultiSelect.sep` controls how collapsed selections are joined.
-- If you want debug output in the log area, configure logging accordingly before using the form.
+- Set `logging_debug=True` if you want `DEBUG` output inside the form log area.
