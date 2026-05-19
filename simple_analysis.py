@@ -124,11 +124,13 @@ class _DataFrameAnalysisWindow:
 		footer = ttk.Frame(parent)
 		footer.pack(fill=tk.X, pady=(12, 0))
 
-		rows, cols = self._dataframe.shape
+		rows, _ = self._dataframe.shape
+		visible_cols = len([column for column in self._visible_columns if column in self._dataframe.columns])
+		total_cols = len(self._dataframe.columns)
 		missing_values = int(self._dataframe.isna().sum().sum())
 		ttk.Label(
 			footer,
-			text=f"Rows: {rows}    Columns: {cols}    Missing values: {missing_values}",
+			text=f"Rows: {rows}    Columns: {visible_cols}/{total_cols}    Missing values: {missing_values}",
 		).pack(side=tk.LEFT)
 
 		ttk.Button(footer, text="Done", command=self._on_done_clicked).pack(side=tk.RIGHT, padx=(8, 0))
