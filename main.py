@@ -26,12 +26,12 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %
 class MyForm(Form):
 
     name_field = TextField(label="Name", default="John Doe")
-    checkbox_field = CheckBox(label="Check me", default=True)
+    checkbox_field = CheckBox(label="Check me", default=True, on_changed="test")
     checkbox_group = CheckBoxGroup(label="Options", options=[
         CheckBox(label="Option 1", default=True),
         CheckBox(label="Option 2"),
         CheckBox(label="Option 3"),
-    ])
+    ], on_changed="tests")
     radio_group = RadioGroup(label="Choose One", options=[
         Radio(label="Choice 1"),
         Radio(label="Choice 2", default=True),
@@ -47,6 +47,12 @@ class MyForm(Form):
     date_field = DatePicker(label="Date", default="18.05.2026", date_format="%d.%m.%Y")
     time_field = TimePicker(label="Time", time_format="%H:%M")
     submit_button = Button(label="Submit", on_click="submit1")
+
+    def test(self):
+        print("Button clicked!")
+
+    def tests(self):
+        print("Buttons clicked!")
 
     def submit1(self):
         name = self.name_field.value

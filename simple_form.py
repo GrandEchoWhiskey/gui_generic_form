@@ -21,6 +21,7 @@ except ImportError:
 class TextField:
     label: str
     default: str = ""
+    on_changed: Optional[str] = None
 
 
 @dataclass
@@ -29,12 +30,14 @@ class PasswordField:
     default: str = ""
     show_char: str = "*"
     can_show: bool = False
+    on_changed: Optional[str] = None
 
 
 @dataclass
 class TextArea:
     label: str
     default: str = ""
+    on_changed: Optional[str] = None
 
 
 @dataclass
@@ -47,6 +50,7 @@ class Button:
 class CheckBox:
     label: str
     default: bool = False
+    on_changed: Optional[str] = None
 
 
 @dataclass
@@ -59,12 +63,14 @@ class Radio:
 class CheckBoxGroup:
     label: str
     options: list[CheckBox]
+    on_changed: Optional[str] = None
 
 
 @dataclass
 class RadioGroup:
     label: str
     options: list[Radio]
+    on_changed: Optional[str] = None
 
     def __post_init__(self):
         defaults_count = sum(1 for opt in self.options if opt.default)
@@ -79,6 +85,7 @@ class Select:
     label: str
     options: list[str]
     default: str = ""
+    on_changed: Optional[str] = None
 
     def __post_init__(self):
         if not self.options:
@@ -94,6 +101,7 @@ class MultiSelect:
     options: list[str]
     default: Optional[list[str]] = None
     sep: str = ", "
+    on_changed: Optional[str] = None
 
     def __post_init__(self):
         if not self.options:
@@ -116,6 +124,7 @@ class NumberField:
     max_value: Optional[float] = None
     step: float = 1.0
     integer: bool = False
+    on_changed: Optional[str] = None
 
     def __post_init__(self):
         if self.step <= 0:
@@ -129,6 +138,7 @@ class FilePath:
     label: str
     default: str = ""
     extensions: dict | list = None
+    on_changed: Optional[str] = None
 
     def __post_init__(self):
         if self.extensions is None:
@@ -139,6 +149,7 @@ class FilePath:
 class DirectoryPath:
     label: str
     default: str = ""
+    on_changed: Optional[str] = None
 
 
 @dataclass
@@ -146,6 +157,7 @@ class DatePicker:
     label: str
     default: str = ""
     date_format: str = "%Y-%m-%d"
+    on_changed: Optional[str] = None
 
     def __post_init__(self):
         try:
@@ -168,6 +180,7 @@ class TimePicker:
     label: str
     default: str = ""
     time_format: str = "%H:%M:%S"
+    on_changed: Optional[str] = None
 
     def __post_init__(self):
         try:
@@ -213,11 +226,27 @@ def _tokenize_format(format_text: str, supported_directives: set[str]):
     return parts
 
 
-class _BoundTextField:
+class _ChangeAwareBoundField:
+    def __init__(self):
+        self._on_changed_callback = None
+
+    def set_on_changed(self, callback):
+        self._on_changed_callback = callback
+
+    def _notify_changed(self):
+        if callable(self._on_changed_callback):
+            self._on_changed_callback()
+
+
+class _BoundTextField(_ChangeAwareBoundField):
     def __init__(self, widget: tk.Entry, default: str = ""):
+        super().__init__()
         self._widget = widget
         if default:
             self._widget.insert(0, default)
+        self._last_value = self.value
+        self._widget.bind("<KeyRelease>", self._on_widget_changed)
+        self._widget.bind("<FocusOut>", self._on_widget_changed)
 
     @property
     def value(self) -> str:
@@ -225,14 +254,25 @@ class _BoundTextField:
 
     @value.setter
     def value(self, new_value: Optional[str]):
+        old_value = self.value
         self._widget.delete(0, tk.END)
         self._widget.insert(0, "" if new_value is None else str(new_value))
+        new_text = self.value
+        self._last_value = new_text
+        if new_text != old_value:
+            self._notify_changed()
 
     def get_value(self) -> str:
         return self.value
 
+    def _on_widget_changed(self, _event):
+        current = self.value
+        if current != self._last_value:
+            self._last_value = current
+            self._notify_changed()
 
-class _BoundPasswordField:
+
+class _BoundPasswordField(_ChangeAwareBoundField):
     def __init__(
         self,
         entry_widget: tk.Entry,
@@ -241,6 +281,7 @@ class _BoundPasswordField:
         default: str = "",
         can_show: bool = True,
     ):
+        super().__init__()
         self._entry = entry_widget
         self._toggle = toggle_button
         self._show_char = show_char if show_char else "*"
@@ -252,6 +293,9 @@ class _BoundPasswordField:
             self._toggle.configure(command=self.toggle_visibility)
         if default:
             self._entry.insert(0, default)
+        self._last_value = self.value
+        self._entry.bind("<KeyRelease>", self._on_widget_changed)
+        self._entry.bind("<FocusOut>", self._on_widget_changed)
 
     @property
     def value(self) -> str:
@@ -259,8 +303,13 @@ class _BoundPasswordField:
 
     @value.setter
     def value(self, new_value: Optional[str]):
+        old_value = self.value
         self._entry.delete(0, tk.END)
         self._entry.insert(0, "" if new_value is None else str(new_value))
+        new_text = self.value
+        self._last_value = new_text
+        if new_text != old_value:
+            self._notify_changed()
 
     def toggle_visibility(self):
         if not self._can_show or self._toggle is None:
@@ -273,13 +322,23 @@ class _BoundPasswordField:
             self._entry.configure(show=self._show_char)
             self._toggle.configure(text="Show")
 
+    def _on_widget_changed(self, _event):
+        current = self.value
+        if current != self._last_value:
+            self._last_value = current
+            self._notify_changed()
 
-class _BoundSelect:
+
+class _BoundSelect(_ChangeAwareBoundField):
     def __init__(self, variable: tk.StringVar, options: list[str], default: str = ""):
+        super().__init__()
         self._variable = variable
         self._options = options
         initial = default if default else options[0]
         self._variable.set(initial)
+        self._last_value = self._variable.get()
+        self._suspend_trace = False
+        self._variable.trace_add("write", self._on_variable_changed)
 
     @property
     def value(self) -> str:
@@ -288,11 +347,26 @@ class _BoundSelect:
     @value.setter
     def value(self, new_value: Optional[str]):
         candidate = "" if new_value is None else str(new_value)
-        if candidate in self._options:
-            self._variable.set(candidate)
+        if candidate not in self._options:
+            return
+        if candidate == self.value:
+            return
+        self._suspend_trace = True
+        self._variable.set(candidate)
+        self._suspend_trace = False
+        self._last_value = candidate
+        self._notify_changed()
+
+    def _on_variable_changed(self, *_args):
+        if self._suspend_trace:
+            return
+        current = self.value
+        if current != self._last_value:
+            self._last_value = current
+            self._notify_changed()
 
 
-class _BoundMultiSelect:
+class _BoundMultiSelect(_ChangeAwareBoundField):
     def __init__(
         self,
         widget: tk.Listbox,
@@ -303,6 +377,7 @@ class _BoundMultiSelect:
         default: list[str],
         sep: str,
     ):
+        super().__init__()
         self._widget = widget
         self._dropdown_frame = dropdown_frame
         self._summary_var = summary_var
@@ -322,6 +397,7 @@ class _BoundMultiSelect:
         self._widget.bind("<<ListboxSelect>>", self._on_listbox_select)
         self._toggle_button.configure(command=self.toggle_dropdown)
         self._refresh_summary()
+        self._last_value = self.value
 
     @property
     def value(self) -> list[str]:
@@ -329,6 +405,7 @@ class _BoundMultiSelect:
 
     @value.setter
     def value(self, new_value):
+        old_value = self.value
         self._widget.selection_clear(0, tk.END)
         if not isinstance(new_value, list):
             return
@@ -337,6 +414,10 @@ class _BoundMultiSelect:
             if option in selected:
                 self._widget.selection_set(index)
         self._refresh_summary()
+        current = self.value
+        self._last_value = current
+        if current != old_value:
+            self._notify_changed()
 
     def toggle_dropdown(self):
         if self._expanded:
@@ -352,18 +433,27 @@ class _BoundMultiSelect:
 
     def _on_listbox_select(self, _event):
         self._refresh_summary()
+        current = self.value
+        if current != self._last_value:
+            self._last_value = current
+            self._notify_changed()
 
     def _refresh_summary(self):
         selected = self.value
         self._summary_var.set(self._sep.join(selected))
 
 
-class _BoundNumberField:
+class _BoundNumberField(_ChangeAwareBoundField):
     def __init__(self, widget: tk.Spinbox, spec: NumberField):
+        super().__init__()
         self._widget = widget
         self._spec = spec
+        self._widget.configure(command=self._on_widget_changed)
+        self._widget.bind("<KeyRelease>", self._on_widget_changed)
+        self._widget.bind("<FocusOut>", self._on_widget_changed)
         if spec.default != "":
             self.value = spec.default
+        self._last_value = self.value
 
     @property
     def value(self):
@@ -386,6 +476,7 @@ class _BoundNumberField:
 
     @value.setter
     def value(self, new_value):
+        old_value = self.value
         try:
             raw = float(new_value)
         except (TypeError, ValueError):
@@ -403,6 +494,16 @@ class _BoundNumberField:
 
         self._widget.delete(0, tk.END)
         self._widget.insert(0, display)
+        current = self.value
+        self._last_value = current
+        if current != old_value:
+            self._notify_changed()
+
+    def _on_widget_changed(self, _event=None):
+        current = self.value
+        if current != self._last_value:
+            self._last_value = current
+            self._notify_changed()
 
 
 class _FormLogHandler(logging.Handler):
@@ -464,11 +565,15 @@ class _FormLogHandler(logging.Handler):
         return "log_debug"
 
 
-class _BoundTextArea:
+class _BoundTextArea(_ChangeAwareBoundField):
     def __init__(self, widget: tk.Text, default: str = ""):
+        super().__init__()
         self._widget = widget
         if default:
             self._widget.insert("1.0", default)
+        self._last_value = self.value
+        self._widget.bind("<KeyRelease>", self._on_widget_changed)
+        self._widget.bind("<FocusOut>", self._on_widget_changed)
 
     @property
     def value(self) -> str:
@@ -476,17 +581,34 @@ class _BoundTextArea:
 
     @value.setter
     def value(self, new_value: Optional[str]):
+        old_value = self.value
         self._widget.delete("1.0", tk.END)
         self._widget.insert("1.0", "" if new_value is None else str(new_value))
+        current = self.value
+        self._last_value = current
+        if current != old_value:
+            self._notify_changed()
 
     def get_value(self) -> str:
         return self.value
 
+    def _on_widget_changed(self, _event):
+        current = self.value
+        if current != self._last_value:
+            self._last_value = current
+            self._notify_changed()
 
-class _BoundCheckBox:
+
+class _BoundCheckBox(_ChangeAwareBoundField):
     def __init__(self, variable: tk.BooleanVar, default: bool = False):
+        super().__init__()
         self._variable = variable
-        self._variable.set(bool(default))
+        self._suspend_trace = False
+        self._last_value = bool(self._variable.get())
+        if self._last_value != bool(default):
+            self._variable.set(bool(default))
+            self._last_value = bool(default)
+        self._variable.trace_add("write", self._on_variable_changed)
 
     @property
     def value(self) -> bool:
@@ -494,15 +616,38 @@ class _BoundCheckBox:
 
     @value.setter
     def value(self, new_value):
-        self._variable.set(bool(new_value))
+        normalized = bool(new_value)
+        if normalized == self.value:
+            return
+        self._suspend_trace = True
+        self._variable.set(normalized)
+        self._suspend_trace = False
+        self._last_value = normalized
+        self._notify_changed()
 
     def get_value(self) -> bool:
         return self.value
 
+    def _on_variable_changed(self, *_args):
+        if self._suspend_trace:
+            return
+        if not hasattr(self, "_last_value"):
+            self._last_value = self.value
+            return
+        current = self.value
+        if current != self._last_value:
+            self._last_value = current
+            self._notify_changed()
 
-class _BoundCheckBoxGroup:
+
+class _BoundCheckBoxGroup(_ChangeAwareBoundField):
     def __init__(self, variables: dict[str, tk.BooleanVar]):
+        super().__init__()
         self._variables = variables
+        self._suspend_trace = False
+        for variable in self._variables.values():
+            variable.trace_add("write", self._on_variable_changed)
+        self._last_value = self.value
 
     @property
     def value(self) -> dict[str, bool]:
@@ -512,17 +657,38 @@ class _BoundCheckBoxGroup:
     def value(self, new_value: dict[str, bool]):
         if not isinstance(new_value, dict):
             return
+        changed = False
+        self._suspend_trace = True
         for label, var in self._variables.items():
             if label in new_value:
-                var.set(bool(new_value[label]))
+                candidate = bool(new_value[label])
+                if bool(var.get()) != candidate:
+                    var.set(candidate)
+                    changed = True
+        self._suspend_trace = False
+        if changed:
+            self._last_value = self.value
+            self._notify_changed()
 
     def get_value(self) -> dict[str, bool]:
         return self.value
 
+    def _on_variable_changed(self, *_args):
+        if self._suspend_trace:
+            return
+        current = self.value
+        if current != self._last_value:
+            self._last_value = current
+            self._notify_changed()
 
-class _BoundRadioGroup:
+
+class _BoundRadioGroup(_ChangeAwareBoundField):
     def __init__(self, variable: tk.StringVar):
+        super().__init__()
         self._variable = variable
+        self._suspend_trace = False
+        self._variable.trace_add("write", self._on_variable_changed)
+        self._last_value = self.value
 
     @property
     def value(self) -> str:
@@ -530,17 +696,36 @@ class _BoundRadioGroup:
 
     @value.setter
     def value(self, new_value: str):
-        self._variable.set(str(new_value) if new_value is not None else "")
+        normalized = str(new_value) if new_value is not None else ""
+        if normalized == self.value:
+            return
+        self._suspend_trace = True
+        self._variable.set(normalized)
+        self._suspend_trace = False
+        self._last_value = normalized
+        self._notify_changed()
 
     def get_value(self) -> str:
         return self.value
 
+    def _on_variable_changed(self, *_args):
+        if self._suspend_trace:
+            return
+        current = self.value
+        if current != self._last_value:
+            self._last_value = current
+            self._notify_changed()
 
-class _BoundFilePath:
+
+class _BoundFilePath(_ChangeAwareBoundField):
     def __init__(self, widget: tk.Entry, default: str = ""):
+        super().__init__()
         self._widget = widget
         if default:
             self._widget.insert(0, default)
+        self._last_value = self.value
+        self._widget.bind("<KeyRelease>", self._on_widget_changed)
+        self._widget.bind("<FocusOut>", self._on_widget_changed)
 
     @property
     def value(self) -> str:
@@ -548,18 +733,33 @@ class _BoundFilePath:
 
     @value.setter
     def value(self, new_value: Optional[str]):
+        old_value = self.value
         self._widget.delete(0, tk.END)
         self._widget.insert(0, "" if new_value is None else str(new_value))
+        current = self.value
+        self._last_value = current
+        if current != old_value:
+            self._notify_changed()
 
     def get_value(self) -> str:
         return self.value
 
+    def _on_widget_changed(self, _event):
+        current = self.value
+        if current != self._last_value:
+            self._last_value = current
+            self._notify_changed()
 
-class _BoundDirectoryPath:
+
+class _BoundDirectoryPath(_ChangeAwareBoundField):
     def __init__(self, widget: tk.Entry, default: str = ""):
+        super().__init__()
         self._widget = widget
         if default:
             self._widget.insert(0, default)
+        self._last_value = self.value
+        self._widget.bind("<KeyRelease>", self._on_widget_changed)
+        self._widget.bind("<FocusOut>", self._on_widget_changed)
 
     @property
     def value(self) -> str:
@@ -567,11 +767,22 @@ class _BoundDirectoryPath:
 
     @value.setter
     def value(self, new_value: Optional[str]):
+        old_value = self.value
         self._widget.delete(0, tk.END)
         self._widget.insert(0, "" if new_value is None else str(new_value))
+        current = self.value
+        self._last_value = current
+        if current != old_value:
+            self._notify_changed()
+
+    def _on_widget_changed(self, _event):
+        current = self.value
+        if current != self._last_value:
+            self._last_value = current
+            self._notify_changed()
 
 
-class _BoundDatePicker:
+class _BoundDatePicker(_ChangeAwareBoundField):
     def __init__(
         self,
         segmented_frame: tk.Frame,
@@ -581,6 +792,7 @@ class _BoundDatePicker:
         date_format: str = "%Y-%m-%d",
         default: str = "",
     ):
+        super().__init__()
         self._segmented_frame = segmented_frame
         self._parts = part_widgets
         self._text_entry = text_entry
@@ -593,9 +805,15 @@ class _BoundDatePicker:
         initial = default if default else ""
         self.value = initial
         self._show_text_mode()
+        self._last_value = self.value
+
+        for widget in self._parts.values():
+            widget.bind("<FocusOut>", self._on_widget_changed)
+            widget.bind("<KeyRelease>", self._on_widget_changed)
 
     def on_split_change(self):
         self._sync_day_limit()
+        self._notify_if_changed()
 
     @property
     def value(self) -> str:
@@ -609,6 +827,7 @@ class _BoundDatePicker:
 
     @value.setter
     def value(self, new_value: Optional[str]):
+        old_value = self.value
         normalized = self._normalize_date(new_value)
         if normalized is None:
             fallback = self._last_valid_value
@@ -616,11 +835,17 @@ class _BoundDatePicker:
             self._set_text_date("" if new_value is None else str(new_value))
             if not new_value:
                 self._set_text_date(self._date_format)
+            self._last_value = self.value
+            if self._last_value != old_value:
+                self._notify_changed()
             return
 
         self._last_valid_value = normalized
         self._set_split_date(normalized)
         self._set_text_date(normalized)
+        self._last_value = self.value
+        if self._last_value != old_value:
+            self._notify_changed()
 
     def toggle_input_mode(self):
         if self._text_mode:
@@ -746,6 +971,7 @@ class _BoundDatePicker:
         if parsed is not None:
             self._last_valid_value = parsed
             self._set_text_date(parsed)
+            self._notify_if_changed()
             return
         self._resolve_invalid_text_value("date")
 
@@ -760,8 +986,17 @@ class _BoundDatePicker:
             number = max_value
         return number
 
+    def _on_widget_changed(self, _event):
+        self._notify_if_changed()
 
-class _BoundTimePicker:
+    def _notify_if_changed(self):
+        current = self.value
+        if current != self._last_value:
+            self._last_value = current
+            self._notify_changed()
+
+
+class _BoundTimePicker(_ChangeAwareBoundField):
     def __init__(
         self,
         segmented_frame: tk.Frame,
@@ -771,6 +1006,7 @@ class _BoundTimePicker:
         time_format: str = "%H:%M:%S",
         default: str = "",
     ):
+        super().__init__()
         self._segmented_frame = segmented_frame
         self._parts = part_widgets
         self._text_entry = text_entry
@@ -787,6 +1023,11 @@ class _BoundTimePicker:
         if normalized_initial is not None:
             self._last_valid_value = normalized_initial
         self._show_text_mode()
+        self._last_value = self.value
+
+        for widget in self._parts.values():
+            widget.bind("<FocusOut>", self._on_widget_changed)
+            widget.bind("<KeyRelease>", self._on_widget_changed)
 
     @property
     def value(self) -> str:
@@ -803,12 +1044,16 @@ class _BoundTimePicker:
 
     @value.setter
     def value(self, new_value: Optional[str]):
+        old_value = self.value
         normalized = self._normalize_time(new_value)
         if normalized is None:
             normalized = self._last_valid_value
         self._last_valid_value = normalized
         self._set_segmented_time(normalized)
         self._set_text_time(normalized)
+        self._last_value = self.value
+        if self._last_value != old_value:
+            self._notify_changed()
 
     def toggle_input_mode(self):
         if self._text_mode:
@@ -925,11 +1170,21 @@ class _BoundTimePicker:
         if parsed is not None:
             self._last_valid_value = parsed
             self._set_text_time(parsed)
+            self._notify_if_changed()
             return
         self._resolve_invalid_text_value("time")
 
     def get_value(self) -> str:
         return self.value
+
+    def _on_widget_changed(self, _event):
+        self._notify_if_changed()
+
+    def _notify_if_changed(self):
+        current = self.value
+        if current != self._last_value:
+            self._last_value = current
+            self._notify_changed()
 
 
 class _CalendarPopup:
@@ -1199,7 +1454,9 @@ class Form:
                 tk.Label(self._frame, text=spec.label).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=(0, 8))
                 entry = tk.Entry(self._frame, width=60)
                 entry.grid(row=row, column=1, sticky="ew", pady=(0, 8))
-                setattr(self, name, _BoundTextField(entry, default=spec.default))
+                bound = _BoundTextField(entry, default=spec.default)
+                self._bind_on_changed(bound, spec.on_changed)
+                setattr(self, name, bound)
                 row += 1
             elif isinstance(spec, PasswordField):
                 tk.Label(self._frame, text=spec.label).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=(0, 8))
@@ -1214,30 +1471,32 @@ class Form:
                     toggle_btn = tk.Button(pass_frame, text="Show", width=6)
                     toggle_btn.pack(side=tk.LEFT, padx=(8, 0))
 
-                setattr(
-                    self,
-                    name,
-                    _BoundPasswordField(
-                        entry,
-                        toggle_btn,
-                        show_char=spec.show_char,
-                        default=spec.default,
-                        can_show=spec.can_show,
-                    ),
+                bound = _BoundPasswordField(
+                    entry,
+                    toggle_btn,
+                    show_char=spec.show_char,
+                    default=spec.default,
+                    can_show=spec.can_show,
                 )
+                self._bind_on_changed(bound, spec.on_changed)
+                setattr(self, name, bound)
                 row += 1
             elif isinstance(spec, TextArea):
                 tk.Label(self._frame, text=spec.label).grid(row=row, column=0, sticky="nw", padx=(0, 10), pady=(0, 8))
                 text = tk.Text(self._frame, width=60, height=6)
                 text.grid(row=row, column=1, sticky="ew", pady=(0, 8))
-                setattr(self, name, _BoundTextArea(text, default=spec.default))
+                bound = _BoundTextArea(text, default=spec.default)
+                self._bind_on_changed(bound, spec.on_changed)
+                setattr(self, name, bound)
                 row += 1
             elif isinstance(spec, Select):
                 tk.Label(self._frame, text=spec.label).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=(0, 8))
                 selected = tk.StringVar()
                 combo = ttk.Combobox(self._frame, textvariable=selected, values=spec.options, state="readonly")
                 combo.grid(row=row, column=1, sticky="ew", pady=(0, 8))
-                setattr(self, name, _BoundSelect(selected, options=spec.options, default=spec.default))
+                bound = _BoundSelect(selected, options=spec.options, default=spec.default)
+                self._bind_on_changed(bound, spec.on_changed)
+                setattr(self, name, bound)
                 row += 1
             elif isinstance(spec, MultiSelect):
                 tk.Label(self._frame, text=spec.label).grid(row=row, column=0, sticky="nw", padx=(0, 10), pady=(0, 8))
@@ -1265,19 +1524,17 @@ class Form:
                 scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
                 listbox.configure(yscrollcommand=scrollbar.set)
 
-                setattr(
-                    self,
-                    name,
-                    _BoundMultiSelect(
-                        listbox,
-                        dropdown_frame,
-                        summary_var,
-                        toggle_btn,
-                        options=spec.options,
-                        default=spec.default or [],
-                        sep=spec.sep,
-                    ),
+                bound = _BoundMultiSelect(
+                    listbox,
+                    dropdown_frame,
+                    summary_var,
+                    toggle_btn,
+                    options=spec.options,
+                    default=spec.default or [],
+                    sep=spec.sep,
                 )
+                self._bind_on_changed(bound, spec.on_changed)
+                setattr(self, name, bound)
                 row += 1
             elif isinstance(spec, NumberField):
                 tk.Label(self._frame, text=spec.label).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=(0, 8))
@@ -1295,7 +1552,9 @@ class Form:
                 )
                 number_spinbox.grid(row=row, column=1, sticky="w", pady=(0, 8))
 
-                setattr(self, name, _BoundNumberField(number_spinbox, spec))
+                bound = _BoundNumberField(number_spinbox, spec)
+                self._bind_on_changed(bound, spec.on_changed)
+                setattr(self, name, bound)
                 row += 1
             elif isinstance(spec, Button):
                 command = self._make_button_handler(spec.on_click)
@@ -1307,7 +1566,9 @@ class Form:
                 checkbox = tk.Checkbutton(self._frame, text=spec.label, variable=variable)
                 checkbox.grid(row=row, column=1, sticky="w", pady=(0, 8))
                 self._single_checkbox_widgets.append({"widget": checkbox, "label": spec.label})
-                setattr(self, name, _BoundCheckBox(variable, default=spec.default))
+                bound = _BoundCheckBox(variable, default=spec.default)
+                self._bind_on_changed(bound, spec.on_changed)
+                setattr(self, name, bound)
                 row += 1
             elif isinstance(spec, CheckBoxGroup):
                 tk.Label(self._frame, text=spec.label).grid(row=row, column=0, sticky="nw", padx=(0, 10), pady=(0, 8))
@@ -1329,7 +1590,9 @@ class Form:
 
                 self._checkbox_groups.append({"frame": options_frame, "widgets": option_widgets, "labels": option_labels})
 
-                setattr(self, name, _BoundCheckBoxGroup(variables))
+                bound = _BoundCheckBoxGroup(variables)
+                self._bind_on_changed(bound, spec.on_changed)
+                setattr(self, name, bound)
                 row += 1
             elif isinstance(spec, RadioGroup):
                 tk.Label(self._frame, text=spec.label).grid(row=row, column=0, sticky="nw", padx=(0, 10), pady=(0, 8))
@@ -1353,7 +1616,9 @@ class Form:
 
                 self._radio_groups.append({"frame": options_frame, "widgets": option_widgets, "labels": option_labels})
 
-                setattr(self, name, _BoundRadioGroup(radio_variable))
+                bound = _BoundRadioGroup(radio_variable)
+                self._bind_on_changed(bound, spec.on_changed)
+                setattr(self, name, bound)
                 row += 1
             elif isinstance(spec, FilePath):
                 tk.Label(self._frame, text=spec.label).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=(0, 8))
@@ -1366,7 +1631,10 @@ class Form:
                 if spec.default:
                     entry.insert(0, spec.default)
                 
-                def make_file_handler(entry_widget, extensions):
+                bound = _BoundFilePath(entry, default=spec.default)
+                self._bind_on_changed(bound, spec.on_changed)
+
+                def make_file_handler(bound_field, extensions):
                     def _handler():
                         if isinstance(extensions, dict):
                             filetypes = [(desc, " ".join(exts)) for desc, exts in extensions.items()]
@@ -1374,16 +1642,15 @@ class Form:
                             filetypes = [(f"Files ({ext})", ext) for ext in extensions]
                         filepath = filedialog.askopenfilename(filetypes=filetypes)
                         if filepath:
-                            entry_widget.delete(0, tk.END)
-                            entry_widget.insert(0, filepath)
+                            bound_field.value = filepath
                     return _handler
                 
-                browse_btn = tk.Button(path_frame, text="Browse", command=make_file_handler(entry, spec.extensions))
+                browse_btn = tk.Button(path_frame, text="Browse", command=make_file_handler(bound, spec.extensions))
                 browse_btn.pack(side=tk.LEFT, padx=(8, 0))
 
-                self._attach_drop_target(entry, entry, target_type="file")
+                self._attach_drop_target(entry, entry, target_type="file", bound_field=bound)
                 
-                setattr(self, name, _BoundFilePath(entry, default=spec.default))
+                setattr(self, name, bound)
                 row += 1
             elif isinstance(spec, DirectoryPath):
                 tk.Label(self._frame, text=spec.label).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=(0, 8))
@@ -1396,20 +1663,22 @@ class Form:
                 if spec.default:
                     entry.insert(0, spec.default)
                 
-                def make_dir_handler(entry_widget):
+                bound = _BoundDirectoryPath(entry, default=spec.default)
+                self._bind_on_changed(bound, spec.on_changed)
+
+                def make_dir_handler(bound_field):
                     def _handler():
                         dirpath = filedialog.askdirectory()
                         if dirpath:
-                            entry_widget.delete(0, tk.END)
-                            entry_widget.insert(0, dirpath)
+                            bound_field.value = dirpath
                     return _handler
                 
-                browse_btn = tk.Button(path_frame, text="Browse", command=make_dir_handler(entry))
+                browse_btn = tk.Button(path_frame, text="Browse", command=make_dir_handler(bound))
                 browse_btn.pack(side=tk.LEFT, padx=(8, 0))
 
-                self._attach_drop_target(entry, entry, target_type="directory")
+                self._attach_drop_target(entry, entry, target_type="directory", bound_field=bound)
                 
-                setattr(self, name, _BoundDirectoryPath(entry, default=spec.default))
+                setattr(self, name, bound)
 
                 row += 1
             elif isinstance(spec, DatePicker):
@@ -1461,6 +1730,7 @@ class Form:
 
                 toggle_btn.configure(command=bound_date.toggle_input_mode)
                 today_btn.configure(command=bound_date.set_today)
+                self._bind_on_changed(bound_date, spec.on_changed)
 
                 def make_date_handler(date_picker, date_format):
                     def _handler():
@@ -1526,6 +1796,7 @@ class Form:
                 )
                 toggle_btn.configure(command=bound_time.toggle_input_mode)
                 now_btn.configure(command=bound_time.set_now)
+                self._bind_on_changed(bound_time, spec.on_changed)
 
                 setattr(self, name, bound_time)
                 row += 1
@@ -1541,14 +1812,33 @@ class Form:
 
         return _handler
 
-    def _attach_drop_target(self, widget, entry_widget: tk.Entry, target_type: str):
+    def _bind_on_changed(self, bound_field, method_name: Optional[str]):
+        callback = self._make_on_changed_handler(method_name)
+        if hasattr(bound_field, "set_on_changed"):
+            bound_field.set_on_changed(callback)
+
+    def _make_on_changed_handler(self, method_name: Optional[str]):
+        if not method_name:
+            return None
+
+        def _handler():
+            callback = getattr(self, method_name, None)
+            if callable(callback):
+                callback()
+
+        return _handler
+
+    def _attach_drop_target(self, widget, entry_widget: tk.Entry, target_type: str, bound_field=None):
         if not self._dnd_enabled or DND_FILES is None:
             return
 
         widget.drop_target_register(DND_FILES)
-        widget.dnd_bind("<<Drop>>", lambda event: self._handle_drop_event(event, entry_widget, target_type))
+        widget.dnd_bind(
+            "<<Drop>>",
+            lambda event: self._handle_drop_event(event, entry_widget, target_type, bound_field=bound_field),
+        )
 
-    def _handle_drop_event(self, event, entry_widget: tk.Entry, target_type: str):
+    def _handle_drop_event(self, event, entry_widget: tk.Entry, target_type: str, bound_field=None):
         paths = self._parse_drop_paths(event.data)
         if not paths:
             return
@@ -1571,6 +1861,10 @@ class Form:
                         break
 
         if not selected_path:
+            return
+
+        if bound_field is not None and hasattr(bound_field, "value"):
+            bound_field.value = selected_path
             return
 
         entry_widget.delete(0, tk.END)
