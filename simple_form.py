@@ -21,6 +21,7 @@ except ImportError:
 class TextField:
     label: str
     default: str = ""
+    read_only: bool = False
     on_changed: Optional[str] = None
 
 
@@ -37,6 +38,7 @@ class PasswordField:
 class TextArea:
     label: str
     default: str = ""
+    read_only: bool = False
     on_changed: Optional[str] = None
 
 
@@ -124,6 +126,7 @@ class NumberField:
     max_value: Optional[float] = None
     step: float = 1.0
     integer: bool = False
+    read_only: bool = False
     on_changed: Optional[str] = None
 
     def __post_init__(self):
@@ -239,11 +242,14 @@ class _ChangeAwareBoundField:
 
 
 class _BoundTextField(_ChangeAwareBoundField):
-    def __init__(self, widget: tk.Entry, default: str = ""):
+    def __init__(self, widget: tk.Entry, default: str = "", read_only: bool = False):
         super().__init__()
         self._widget = widget
+        self._read_only = bool(read_only)
         if default:
-            self._widget.insert(0, default)
+            self._set_widget_text(default)
+        if self._read_only:
+            self._widget.configure(state="readonly")
         self._last_value = self.value
         self._widget.bind("<KeyRelease>", self._on_widget_changed)
         self._widget.bind("<FocusOut>", self._on_widget_changed)
@@ -255,8 +261,7 @@ class _BoundTextField(_ChangeAwareBoundField):
     @value.setter
     def value(self, new_value: Optional[str]):
         old_value = self.value
-        self._widget.delete(0, tk.END)
-        self._widget.insert(0, "" if new_value is None else str(new_value))
+        self._set_widget_text("" if new_value is None else str(new_value))
         new_text = self.value
         self._last_value = new_text
         if new_text != old_value:
@@ -270,6 +275,16 @@ class _BoundTextField(_ChangeAwareBoundField):
         if current != self._last_value:
             self._last_value = current
             self._notify_changed()
+
+    def _set_widget_text(self, text: str):
+        if self._read_only:
+            self._widget.configure(state="normal")
+            self._widget.delete(0, tk.END)
+            self._widget.insert(0, text)
+            self._widget.configure(state="readonly")
+            return
+        self._widget.delete(0, tk.END)
+        self._widget.insert(0, text)
 
 
 class _BoundPasswordField(_ChangeAwareBoundField):
@@ -448,11 +463,14 @@ class _BoundNumberField(_ChangeAwareBoundField):
         super().__init__()
         self._widget = widget
         self._spec = spec
+        self._read_only = bool(spec.read_only)
         self._widget.configure(command=self._on_widget_changed)
         self._widget.bind("<KeyRelease>", self._on_widget_changed)
         self._widget.bind("<FocusOut>", self._on_widget_changed)
         if spec.default != "":
             self.value = spec.default
+        if self._read_only:
+            self._widget.configure(state="readonly")
         self._last_value = self.value
 
     @property
@@ -492,8 +510,7 @@ class _BoundNumberField(_ChangeAwareBoundField):
         else:
             display = str(raw)
 
-        self._widget.delete(0, tk.END)
-        self._widget.insert(0, display)
+        self._set_widget_text(display)
         current = self.value
         self._last_value = current
         if current != old_value:
@@ -504,6 +521,16 @@ class _BoundNumberField(_ChangeAwareBoundField):
         if current != self._last_value:
             self._last_value = current
             self._notify_changed()
+
+    def _set_widget_text(self, text: str):
+        if self._read_only:
+            self._widget.configure(state="normal")
+            self._widget.delete(0, tk.END)
+            self._widget.insert(0, text)
+            self._widget.configure(state="readonly")
+            return
+        self._widget.delete(0, tk.END)
+        self._widget.insert(0, text)
 
 
 class _FormLogHandler(logging.Handler):
@@ -566,11 +593,14 @@ class _FormLogHandler(logging.Handler):
 
 
 class _BoundTextArea(_ChangeAwareBoundField):
-    def __init__(self, widget: tk.Text, default: str = ""):
+    def __init__(self, widget: tk.Text, default: str = "", read_only: bool = False):
         super().__init__()
         self._widget = widget
+        self._read_only = bool(read_only)
         if default:
-            self._widget.insert("1.0", default)
+            self._set_widget_text(default)
+        if self._read_only:
+            self._widget.configure(state=tk.DISABLED)
         self._last_value = self.value
         self._widget.bind("<KeyRelease>", self._on_widget_changed)
         self._widget.bind("<FocusOut>", self._on_widget_changed)
@@ -582,8 +612,7 @@ class _BoundTextArea(_ChangeAwareBoundField):
     @value.setter
     def value(self, new_value: Optional[str]):
         old_value = self.value
-        self._widget.delete("1.0", tk.END)
-        self._widget.insert("1.0", "" if new_value is None else str(new_value))
+        self._set_widget_text("" if new_value is None else str(new_value))
         current = self.value
         self._last_value = current
         if current != old_value:
@@ -597,6 +626,16 @@ class _BoundTextArea(_ChangeAwareBoundField):
         if current != self._last_value:
             self._last_value = current
             self._notify_changed()
+
+    def _set_widget_text(self, text: str):
+        if self._read_only:
+            self._widget.configure(state=tk.NORMAL)
+            self._widget.delete("1.0", tk.END)
+            self._widget.insert("1.0", text)
+            self._widget.configure(state=tk.DISABLED)
+            return
+        self._widget.delete("1.0", tk.END)
+        self._widget.insert("1.0", text)
 
 
 class _BoundCheckBox(_ChangeAwareBoundField):
@@ -1454,7 +1493,7 @@ class Form:
                 tk.Label(self._frame, text=spec.label).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=(0, 8))
                 entry = tk.Entry(self._frame, width=60)
                 entry.grid(row=row, column=1, sticky="ew", pady=(0, 8))
-                bound = _BoundTextField(entry, default=spec.default)
+                bound = _BoundTextField(entry, default=spec.default, read_only=spec.read_only)
                 self._bind_on_changed(bound, spec.on_changed)
                 setattr(self, name, bound)
                 row += 1
@@ -1485,7 +1524,7 @@ class Form:
                 tk.Label(self._frame, text=spec.label).grid(row=row, column=0, sticky="nw", padx=(0, 10), pady=(0, 8))
                 text = tk.Text(self._frame, width=60, height=6)
                 text.grid(row=row, column=1, sticky="ew", pady=(0, 8))
-                bound = _BoundTextArea(text, default=spec.default)
+                bound = _BoundTextArea(text, default=spec.default, read_only=spec.read_only)
                 self._bind_on_changed(bound, spec.on_changed)
                 setattr(self, name, bound)
                 row += 1
