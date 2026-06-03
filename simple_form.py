@@ -1845,9 +1845,7 @@ class Form:
 
     def _make_button_handler(self, method_name: str):
         def _handler():
-            callback = getattr(self, method_name, None)
-            if callable(callback):
-                callback()
+            self._invoke_callback(method_name)
 
         return _handler
 
@@ -1856,14 +1854,26 @@ class Form:
         if hasattr(bound_field, "set_on_changed"):
             bound_field.set_on_changed(callback)
 
+    def _invoke_callback(self, method_name: Optional[str]):
+        if not method_name:
+            return
+
+        callback = getattr(self, method_name, None)
+        if callback is None:
+            logging.warning("Callback '%s' was not found on form '%s'", method_name, self.__class__.__name__)
+            return
+        if not callable(callback):
+            logging.warning("Callback '%s' on form '%s' is not callable", method_name, self.__class__.__name__)
+            return
+
+        callback()
+
     def _make_on_changed_handler(self, method_name: Optional[str]):
         if not method_name:
             return None
 
         def _handler():
-            callback = getattr(self, method_name, None)
-            if callable(callback):
-                callback()
+            self._invoke_callback(method_name)
 
         return _handler
 

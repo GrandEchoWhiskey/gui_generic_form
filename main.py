@@ -50,6 +50,7 @@ class MyForm(Form):
 
     def test(self):
         print("Button clicked!")
+        self.tests()
 
     def tests(self):
         print("Buttons clicked!")
@@ -85,7 +86,7 @@ class MyForm(Form):
             "Hire Date": ["2020-01-15", "2019-06-20", "2021-03-10", "2018-11-05", "2020-07-22", "2019-09-14", "2021-01-30", "2020-05-18", "2019-12-25", "2021-04-12"],
             "Performance": [4.5, 4.2, 4.8, 4.1, 4.3, 4.6, 4.7, 4.0, 4.4, 4.9],
             "Projects": [3, 5, 4, 6, 2, 5, 3, 4, 6, 2],
-            "Status": ["Active", "Active", "Active", "Inactive", "Active", "Inactive", "Active", "Active", "Inactive", "Active"],
+            "Status": ["Active\nConnecting\n\n\nTesting", "Active", "Active", "Inactive", "Active", "Inactive", "Active", "Active", "Inactive", "Active"],
             "Experience": [5, 8, 3, 6, 4, 7, 5, 6, 4, 7],
             "Bonus": [5000, 7000, 8000, 6000, 7500, 8200, 8800, 7700, 8300, 8900],
             "Certifications": [2, 4, 3, 5, 3, 4, 2, 3, 4, 5],

@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
+import tkinter.font as tkfont
 
 import pandas as pd
 
@@ -70,12 +71,25 @@ class _DataFrameAnalysisWindow:
 		self._done_clicked = False  # Track if Done button was clicked
 		self._notebook = None
 		self._tabs: dict[str, ttk.Frame] = {}
+		self._base_row_height = 24
+		self._inline_view_enabled = False
+		self._inline_view_var: tk.BooleanVar | None = None
+		self._tree_style_name = f"Analysis.Treeview.{id(self)}"
+		self._tree_style = None
 		if tk._default_root is None:
 			self._root = tk.Tk()
 			self._owns_mainloop = True
 		else:
 			self._root = tk.Toplevel(tk._default_root)
 			self._owns_mainloop = False
+		# Measure actual font line height for tight row sizing
+		try:
+			_f = tkfont.nametofont("TkDefaultFont")
+			self._base_row_height = max(18, _f.metrics("linespace") + 6)
+		except Exception:
+			self._base_row_height = 24
+		self._tree_style = ttk.Style(self._root)
+		self._ensure_tree_style()
 		self._root.title(title)
 		self._root.geometry("1000x640")
 		self._root.minsize(700, 420)
@@ -304,11 +318,20 @@ class _DataFrameAnalysisWindow:
 
 	def _populate_table(self, parent, dataframe: pd.DataFrame, tab_name: str):
 		if tab_name == "Data":
+			self._ensure_tree_style()
 			action_row = ttk.Frame(parent)
 			action_row.pack(fill=tk.X, pady=(0, 8))
 			ttk.Button(action_row, text="Add Row", command=self._open_add_row_from_pointer).pack(side=tk.LEFT)
 			ttk.Button(action_row, text="Filter Columns", command=self._open_column_filter).pack(side=tk.LEFT, padx=(8, 0))
 			ttk.Button(action_row, text="Clear Sort", command=self._clear_data_sort).pack(side=tk.LEFT, padx=(8, 0))
+			if self._inline_view_var is None:
+				self._inline_view_var = tk.BooleanVar(value=self._inline_view_enabled)
+			ttk.Checkbutton(
+				action_row,
+				text="Expanded View",
+				variable=self._inline_view_var,
+				command=self._on_inline_view_changed,
+			).pack(side=tk.LEFT, padx=(10, 0))
 			ttk.Label(action_row, text="Search:").pack(side=tk.LEFT, padx=(16, 4))
 			search_entry = ttk.Entry(action_row, width=25)
 			search_entry.pack(side=tk.LEFT)
@@ -373,8 +396,15 @@ class _DataFrameAnalysisWindow:
 		table_frame.pack(fill=tk.BOTH, expand=True)
 
 		columns = [str(column) for column in dataframe.columns]
-		tree = ttk.Treeview(table_frame, columns=columns, show="headings")
+		tree_kwargs = {"columns": columns, "show": "headings"}
+		if tab_name == "Data":
+			tree_kwargs["style"] = self._tree_style_name
+		tree = ttk.Treeview(table_frame, **tree_kwargs)
 		tree.grid(row=0, column=0, sticky="nsew")
+		tree.tag_configure("evenrow", background="#ffffff")
+		tree.tag_configure("oddrow", background="#f0f4fa")
+		if tab_name == "Data":
+			self._apply_tree_row_height(dataframe)
 
 		y_scroll = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=tree.yview)
 		y_scroll.grid(row=0, column=1, sticky="ns")
@@ -409,7 +439,13 @@ class _DataFrameAnalysisWindow:
 			iid = str(len(tree.get_children()))
 			if tab_name == "Data" and row_idx < len(self._data_row_positions):
 				iid = str(self._data_row_positions[row_idx])
-			tree.insert("", tk.END, iid=iid, values=tuple("" if value is None else str(value) for value in row))
+			values, lh_tag = self._prepare_row(row)
+			stripe = "oddrow" if row_idx % 2 else "evenrow"
+			if tab_name == "Data":
+				tags = (stripe, lh_tag) if lh_tag else (stripe,)
+			else:
+				tags = (stripe,)
+			tree.insert("", tk.END, iid=iid, values=values, tags=tags)
 
 		if tab_name == "Data":
 			self._data_tree = tree
@@ -463,6 +499,8 @@ class _DataFrameAnalysisWindow:
 		if not self._data_tree or not self._data_tree.winfo_exists():
 			return
 
+		self._apply_tree_row_height(dataframe)
+
 		for item in self._data_tree.get_children():
 			self._data_tree.delete(item)
 
@@ -470,7 +508,52 @@ class _DataFrameAnalysisWindow:
 			iid = ""
 			if row_positions is not None and row_idx < len(row_positions):
 				iid = str(row_positions[row_idx])
-			self._data_tree.insert("", tk.END, iid=iid, values=tuple("" if value is None else str(value) for value in row))
+			values, lh_tag = self._prepare_row(row)
+			stripe = "oddrow" if row_idx % 2 else "evenrow"
+			tags = (stripe, lh_tag) if lh_tag else (stripe,)
+			self._data_tree.insert("", tk.END, iid=iid, values=values, tags=tags)
+
+	def _on_inline_view_changed(self):
+		if self._inline_view_var is not None:
+			self._inline_view_enabled = self._inline_view_var.get()
+		self._render_tabs()
+
+	def _prepare_row(self, row) -> tuple[tuple, str | None]:
+		"""Return display values and a font-tag name for per-row height."""
+		if self._inline_view_enabled:
+			values = tuple("" if v is None else str(v) for v in row)
+			max_lines = max((str(v).count("\n") + 1 for v in values), default=1)
+		else:
+			values = tuple("" if v is None else str(v).replace("\n", "\\n") for v in row)
+			max_lines = 1
+		tag = f"_lh{max_lines}" if max_lines > 1 else None
+		return values, tag
+
+	def _ensure_tree_style(self):
+		if self._tree_style is None:
+			self._tree_style = ttk.Style(self._root)
+
+		try:
+			self._tree_style.layout(self._tree_style_name)
+		except tk.TclError:
+			self._tree_style.layout(self._tree_style_name, self._tree_style.layout("Treeview"))
+
+		self._tree_style.configure(self._tree_style_name, rowheight=self._base_row_height)
+
+	def _apply_tree_row_height(self, dataframe: pd.DataFrame):
+		self._ensure_tree_style()
+		if not self._inline_view_enabled:
+			return  # base rowheight already set in _ensure_tree_style
+
+		max_line_count = 1
+		if not dataframe.empty and len(dataframe.columns) > 0:
+			for column in dataframe.columns:
+				newline_counts = dataframe[column].astype(str).str.count("\n")
+				if not newline_counts.empty:
+					column_max = int(newline_counts.max()) + 1
+					max_line_count = max(max_line_count, column_max)
+
+		self._tree_style.configure(self._tree_style_name, rowheight=self._base_row_height * max_line_count)
 
 	def _add_advanced_filter(self, column: str, condition: str, value: str):
 		self._advanced_filters.append({"column": column, "condition": condition, "value": value})
@@ -739,13 +822,16 @@ class _DataFrameAnalysisWindow:
 		fields_frame.bind("<Configure>", _sync_scroll_region)
 		fields_canvas.bind("<Configure>", _sync_fields_width)
 
-		entries: dict[str, tk.Entry] = {}
+		entries: dict[str, tk.Widget] = {}
 		for row_index, column in enumerate(edit_columns):
 			ttk.Label(fields_frame, text=str(column)).grid(row=row_index, column=0, sticky="w", padx=(0, 12), pady=4)
-			entry = ttk.Entry(fields_frame)
+			entry = tk.Text(fields_frame, height=2, wrap=tk.WORD)
 			entry.grid(row=row_index, column=1, sticky="ew", pady=4)
 			value = row_series[column]
-			entry.insert(0, "" if pd.isna(value) else str(value))
+			text_value = "" if pd.isna(value) else str(value)
+			entry.insert("1.0", text_value)
+			line_count = max(2, min(6, text_value.count("\n") + 1))
+			entry.configure(height=line_count)
 			entries[str(column)] = entry
 
 		fields_frame.grid_columnconfigure(1, weight=1)
@@ -797,20 +883,20 @@ class _DataFrameAnalysisWindow:
 		final_y = min(max(0, y), max(0, screen_height - window_height))
 		dialog.geometry(f"+{final_x}+{final_y}")
 
-	def _save_row_edits(self, row_position: int | None, entries: dict[str, tk.Entry], dialog: tk.Toplevel):
+	def _save_row_edits(self, row_position: int | None, entries: dict[str, tk.Widget], dialog: tk.Toplevel):
 		if row_position is None:
 			new_row: dict[str, object] = {}
 			for column in self._dataframe.columns:
 				key = str(column)
 				if key in entries:
-					text_value = entries[key].get()
+					text_value = self._editor_value(entries[key])
 					new_row[key] = self._coerce_new_value(text_value, self._dataframe[column].dtype)
 				else:
 					new_row[key] = pd.NA
 			self._dataframe.loc[len(self._dataframe)] = new_row
 		else:
 			for column_name, entry in entries.items():
-				text_value = entry.get()
+				text_value = self._editor_value(entry)
 				previous_value = self._dataframe.at[self._dataframe.index[row_position], column_name]
 				column_dtype = self._dataframe[column_name].dtype
 				converted_value = self._coerce_value(text_value, previous_value, column_dtype)
@@ -818,6 +904,11 @@ class _DataFrameAnalysisWindow:
 
 		dialog.destroy()
 		self._render_tabs()
+
+	def _editor_value(self, widget: tk.Widget) -> str:
+		if isinstance(widget, tk.Text):
+			return widget.get("1.0", tk.END).rstrip("\n")
+		return widget.get()
 
 	def _delete_row(self, row_position: int, dialog: tk.Toplevel):
 		confirmed = messagebox.askyesno(
